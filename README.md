@@ -52,6 +52,23 @@ BERT トークナイザが付ける末尾の `[SEP]` (= EOS) は GIT の multimo
 | `--max-num-batched-tokens 256` (prefill と decode の混在 + prefix cache hit) | 6/6 完全一致, max \|Δlogprob\| 2.1e-5 (スケジューラ修正前は 7e-3) |
 | `--no-mm-prefix` (双方向 mask を切ったアブレーション) | 3/6 不一致, max \|Δlogprob\| 0.27 → mask が効いていることの確認 |
 
+### バッチサイズ 1 での数値一致 (prefix caching なし)
+
+`--max-num-seqs 1` で vLLM も 1 リクエストずつ処理した場合と、まとめて処理した場合:
+
+| vLLM | 生成トークン | bit 一致した logprob | 平均 / 最大 \|Δlogprob\| (vs HF) |
+|---|---|---:|---|
+| バッチサイズ 1 (eager / compile) | 6/6 一致 | 0/38 | 7e-6 / 2.1e-5 |
+| まとめて処理 (eager / compile) | 6/6 一致 | 0/38 | 3e-6 / 1.7e-5 |
+| 参考: vLLM バッチサイズ 1 vs vLLM まとめて | 6/6 一致 | 4–5/38 | 最大 2.1e-5 |
+
+バッチサイズ 1 でも bit 一致はしない。浮動小数点の加算は結合則を満たさず、HF と vLLM では総和の順序が違うため
+(fused QKV GEMM と別々の Linear、`[batch, seq, hidden]` と `[num_tokens, hidden]` の GEMM 形状、
+ブロック単位の online softmax をする paged attention kernel と QKᵀ を一括で作る eager attention、GELU の実装、CLIP 側の SDPA など)。
+vLLM 自身もバッチの組み方で同程度 (〜2e-5) 変わるので、HF との差はこの丸め誤差の範囲に収まっている。
+`VLLM_BATCH_INVARIANT=1` は GPU (NVIDIA cc≥8.0 / AMD Instinct / Intel XPU) 専用で CPU では使えず、
+保証するのも vLLM 内でのバッチ不変性であって HF との bit 一致ではない。
+
 ## ベンチマーク (Apple M3 8GB / CPU, fp32)
 
 `scripts/bench_hf_vs_vllm.py`: リクエストごとに別画像 (prefix cache は効かない)、出力長固定 (`ignore_eos`)、

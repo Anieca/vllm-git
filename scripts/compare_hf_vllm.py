@@ -2,13 +2,19 @@
 
 Usage:
     python scripts/compare_hf_vllm.py [--model microsoft/git-base-coco] [--eager]
-        [--max-num-batched-tokens N] [--no-mm-prefix]
+        [--max-num-batched-tokens N] [--max-num-seqs N] [--no-mm-prefix]
+        [--no-prefix-caching] [--dump-vllm out.json]
+
+`--max-num-seqs 1` makes vLLM run one request at a time (batch size 1, like the
+HF side). `--dump-vllm` saves vLLM's token ids and logprobs, e.g. to check that
+vLLM gives the same numbers with and without batching.
 
 `--no-mm-prefix` disables the bidirectional image mask (plain causal attention)
 as an ablation: the outputs are then expected to diverge from HF.
 """
 
 import argparse
+import json
 import math
 
 import torch
@@ -60,12 +66,21 @@ def run_hf(model_id, cases):
     return results
 
 
-def run_vllm(model_id, cases, eager, max_num_batched_tokens, mm_prefix, prefix_caching):
+def run_vllm(
+    model_id,
+    cases,
+    eager,
+    max_num_batched_tokens,
+    max_num_seqs,
+    mm_prefix,
+    prefix_caching,
+):
     llm = LLM(
         model=model_id,
         dtype="float32",
         max_model_len=512,
         max_num_batched_tokens=max_num_batched_tokens,
+        max_num_seqs=max_num_seqs,
         enforce_eager=eager,
         limit_mm_per_prompt={"image": 1},
         hf_overrides=None if mm_prefix else {"is_mm_prefix_lm": False},
@@ -95,8 +110,10 @@ def main():
     parser.add_argument("--model", default="microsoft/git-base-coco")
     parser.add_argument("--eager", action="store_true")
     parser.add_argument("--max-num-batched-tokens", type=int, default=None)
+    parser.add_argument("--max-num-seqs", type=int, default=None)
     parser.add_argument("--no-mm-prefix", action="store_true")
     parser.add_argument("--no-prefix-caching", action="store_true")
+    parser.add_argument("--dump-vllm", help="save vLLM token ids / logprobs as JSON")
     args = parser.parse_args()
 
     images = load_images()
@@ -110,12 +127,24 @@ def main():
         cases,
         args.eager,
         args.max_num_batched_tokens,
+        args.max_num_seqs,
         not args.no_mm_prefix,
         not args.no_prefix_caching,
     )
 
+    if args.dump_vllm:
+        with open(args.dump_vllm, "w") as f:
+            json.dump(
+                {
+                    label: {"ids": ids, "logprobs": lps}
+                    for label, (ids, lps, *_) in zip(labels, vl)
+                },
+                f,
+            )
+
     n_match = 0
     max_diff = 0.0
+    all_diffs = []
     for label, (hf_ids, hf_lps), (vl_ids, vl_lps, vl_top, n_prompt) in zip(
         labels, hf, vl
     ):
@@ -127,6 +156,7 @@ def main():
             n += 1
         diffs = [abs(a - b) for a, b in zip(hf_lps[:n], vl_lps[:n])]
         max_diff = max([max_diff, *diffs])
+        all_diffs += diffs
         exact = hf_ids == vl_ids
         near_tie = (
             not exact and n < len(hf_ids) and n < len(vl_top) and hf_ids[n] in vl_top[n]
@@ -140,6 +170,11 @@ def main():
             print(f"   max |logprob diff| over {n} common tokens: {max(diffs):.2e}")
 
     print(f"\n{n_match}/{len(cases)} exact matches, max |logprob diff| {max_diff:.2e}")
+    n_same = sum(d == 0.0 for d in all_diffs)
+    mean = sum(all_diffs) / max(len(all_diffs), 1)
+    print(
+        f"bit-identical logprobs: {n_same}/{len(all_diffs)}, mean |logprob diff| {mean:.2e}"
+    )
     if not math.isfinite(max_diff) or n_match != len(cases):
         raise SystemExit(1)
 
