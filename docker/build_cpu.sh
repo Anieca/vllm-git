@@ -3,7 +3,7 @@
 # using upstream's docker/Dockerfile.cpu. Native arch: linux/arm64 on Apple
 # silicon / Graviton, linux/amd64 elsewhere.
 #
-#   MAX_JOBS=4 docker/build_cpu.sh
+#   MAX_JOBS=2 docker/build_cpu.sh   # 8GB host: 2 jobs; 4 ran the VM out of memory
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
@@ -16,7 +16,7 @@ docker buildx build \
   --platform "$platform" \
   -f vllm/docker/Dockerfile.cpu \
   --target vllm-openai \
-  --build-arg max_jobs="${MAX_JOBS:-4}" \
+  --build-arg max_jobs="${MAX_JOBS:-2}" \
   --tag vllm-git:cpu \
   --load \
   vllm

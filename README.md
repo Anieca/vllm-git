@@ -107,6 +107,17 @@ python scripts/query_server.py --image stop_sign             # キャプショ�
 python scripts/query_server.py --image stop_sign --prompt "a photo of"
 ```
 
+### Docker での検証結果 (colima: linux/arm64, 4 CPU / 6GB, fork commit `f1766d5b1`)
+
+| 条件 | 結果 |
+|---|---|
+| `run_cpu.sh compare` (torch.compile) | 6/6 完全一致, max \|Δlogprob\| 2.4e-5 |
+| `run_cpu.sh compare --max-num-batched-tokens 256` (prefix cache hit + 混在バッチ) | 6/6 完全一致, max \|Δlogprob\| 1.9e-5 |
+| `run_cpu.sh compare --eager` | 6/6 完全一致, max \|Δlogprob\| 2.1e-5 |
+| `run_cpu.sh serve` (fp32) + `query_server.py` | stop_sign / cherry_blossom × プロンプト有無の 4 件で HF と同じキャプション |
+
+8GB の Mac でビルドする場合は `MAX_JOBS=2` (4 だと oneDNN のコンパイル中に VM がメモリ不足で落ちた)。
+
 GIT のトークナイザには chat template が無いので、`serving/git_chat_template.jinja` (`[CLS]` + 最後の user メッセージのテキスト) を渡している。
 
 ## TODO
