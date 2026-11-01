@@ -78,7 +78,6 @@ def run_vllm(
     llm = LLM(
         model=model_id,
         dtype="float32",
-        max_model_len=512,
         max_num_batched_tokens=max_num_batched_tokens,
         max_num_seqs=max_num_seqs,
         enforce_eager=eager,
