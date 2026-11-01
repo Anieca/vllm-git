@@ -1,0 +1,6 @@
+# vLLM fork checkout (its own git repo, branch add-git-model)
+/vllm/
+/.venv/
+logs*.txt
+build.log
+__pycache__/

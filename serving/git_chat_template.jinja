@@ -1,0 +1,15 @@
+{#- GIT has no chat format: the prompt is `[CLS]` followed by the text of the
+    last user message (empty for plain captioning). The image goes in front of
+    it through vLLM's GIT processor, so image parts are ignored here. -#}
+[CLS]
+{%- for message in messages if message['role'] == 'user' -%}
+    {%- if loop.last -%}
+        {%- if message['content'] is string -%}
+            {{ message['content'] }}
+        {%- else -%}
+            {%- for part in message['content'] if part['type'] == 'text' -%}
+                {{ part['text'] }}
+            {%- endfor -%}
+        {%- endif -%}
+    {%- endif -%}
+{%- endfor -%}
