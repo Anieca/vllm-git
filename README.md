@@ -1,7 +1,7 @@
 # vllm-git
 
 GIT (Generative Image-to-text Transformer, `GitForCausalLM`) を vLLM で動かすための作業リポジトリ。
-モデル実装そのものは vLLM の fork (`./vllm`, ブランチ `add-git-model`) に in-tree で入れてあり、
+モデル実装そのものは vLLM の fork ([Anieca/vllm@add-git-model](https://github.com/Anieca/vllm/tree/add-git-model), ローカルでは `./vllm`) に in-tree で入れてあり、
 そのまま upstream に PR できる形にしている。このリポジトリには検証スクリプトと Docker/serving 周りだけを置く。
 
 ## vLLM 側の変更 (`./vllm`, branch `add-git-model`)
@@ -52,6 +52,24 @@ BERT トークナイザが付ける末尾の `[SEP]` (= EOS) は GIT の multimo
 | `--max-num-batched-tokens 256` (prefill と decode の混在 + prefix cache hit) | 6/6 完全一致, max \|Δlogprob\| 2.1e-5 (スケジューラ修正前は 7e-3) |
 | `--no-mm-prefix` (双方向 mask を切ったアブレーション) | 3/6 不一致, max \|Δlogprob\| 0.27 → mask が効いていることの確認 |
 
+## ベンチマーク (Apple M3 8GB / CPU, fp32)
+
+`scripts/bench_hf_vs_vllm.py`: リクエストごとに別画像 (prefix cache は効かない)、出力長固定 (`ignore_eos`)、
+画像前処理込みで、HF `generate` (固定バッチ) と vLLM (paged attention + continuous batching) を比較。
+
+| workload | config | 1 req latency [s] | total [s] | output tok/s |
+|---|---|---:|---:|---:|
+| 64 req × 32 tok | HF (batch 8) | 0.26 | 7.67–7.70 | 266 |
+| | vLLM | 0.30–0.35 | 4.43–4.84 | 423–462 |
+| | vLLM, mm_prefix 補正なし (参考) | 0.30 | 4.27–4.36 | 469–479 |
+| 128 req × 64 tok | HF (batch 16) | 0.45 | 18.36 | 446 |
+| | vLLM | 0.56 | 13.02 | 629 |
+| | vLLM, mm_prefix 補正なし (参考) | 0.52 | 12.68 | 646 |
+
+- スループットは vLLM が HF の **1.4–1.7 倍**。単発リクエストのレイテンシはエンジンのオーバーヘッドで vLLM の方がやや遅い。
+- CPU の mm_prefix 補正 (画像行の再計算) のコストは全体の 3–10%。補正なしは出力が HF とずれるので参考値。
+- 各 1–2 回の計測で、ばらつきは ±10% 程度。GPU では未計測。
+
 vLLM のテスト:
 
 ```bash
@@ -64,6 +82,7 @@ pytest tests/models/multimodal/generation/test_common.py -k git       # HF 比�
 ## ローカル (macOS, ネイティブビルド)
 
 ```bash
+git clone -b add-git-model https://github.com/Anieca/vllm.git vllm
 uv venv -p 3.12 .venv && source .venv/bin/activate
 cd vllm && uv pip install -r requirements/cpu.txt && uv pip install -e . && cd ..
 VLLM_CPU_KVCACHE_SPACE=1 python scripts/compare_hf_vllm.py
@@ -71,6 +90,10 @@ VLLM_CPU_KVCACHE_SPACE=1 python scripts/compare_hf_vllm.py
 
 8GB マシンでは `VLLM_CPU_KVCACHE_SPACE=1` (GiB) を指定しないと KV cache の確保で落ちる。
 `vllm serve` は CPU だと `--dtype auto` で bf16 に落ちるので、HF と揃えたいときは `--dtype float32`。
+
+```bash
+python scripts/bench_hf_vs_vllm.py --num-requests 64 --output-len 32   # ベンチマーク
+```
 
 ## Docker (CPU)
 
