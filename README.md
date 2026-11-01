@@ -75,8 +75,8 @@ python scripts/query_server.py --image stop_sign --prompt "a photo of"
 GIT のトークナイザには chat template が無いので、`serving/git_chat_template.jinja` (`[CLS]` + 最後の user メッセージ) を渡している。
 
 Docker での確認 (colima, linux/arm64, 4 CPU / 6GB): `compare` の 3 設定 (compile / eager / バッチ混在) がすべて 6/6 一致 (最大 2.4e-5)、
-`serve` + `query_server.py` の 4 件が HF と同じキャプション。ただしこれは整理前の commit `f1766d5b1` で確認したもので、
-その後のレビュー対応と整理はネイティブでのみ再確認している (イメージは未再ビルド)。
+`serve` + `query_server.py` の 4 件が HF と同じキャプション。ただしこれは PR のレビュー対応・整理より前のコードで確認したもので、
+その後はネイティブでのみ再確認している (イメージは未再ビルド)。
 
 ## TODO
 
