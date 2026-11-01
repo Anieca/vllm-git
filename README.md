@@ -29,6 +29,22 @@ HF と vLLM で総和の順序が違うため (fused QKV と別々の Linear、G
 QKᵀ を一括で作る eager attention、GELU・CLIP 側の attention 実装など)。vLLM 自身もバッチの組み方で最大 2e-5 変わるので、
 HF との差はこの丸め誤差の範囲内。`VLLM_BATCH_INVARIANT=1` は GPU 専用で CPU では使えず、保証するのも vLLM 内の一致で HF との一致ではない。
 
+## vLLM に既にあるモデルでの再現 (Gemma3)
+
+PR1 と PR2 は GIT なしで確認できる。`hf-internal-testing/tiny-random-Gemma3ForConditionalGeneration` は 1 層で、
+画像トークンの KV が他のトークンに依存しないためバグが数値に出ない。同じ設定で層を増やし、重みを大きくして作る
+(`scripts/build_tiny_gemma3.py`、200 万パラメータ、8.7MB)。
+
+| 確認 | スクリプト | 条件 | 結果 |
+|---|---|---|---|
+| PR2: HF との一致 | `tiny_gemma3_parity.py DIR` | 3 層、画像 2 枚、top-5 logprob | 最大差 4.3e-6。`--no-mm-prefix` では 1.45e-1 |
+| PR1: 途中ヒットの分割 | `repro_mid_item_split.py DIR` | 6 層・std 2。単独実行との logprob 最大差 | PR1 あり 1.5e-5、main 3.5e-3 |
+
+`repro_mid_item_split.py` は単一プロセスで走らせる (既定)。マルチプロセスだと、画像の前処理に時間がかかるリクエストが
+テキストだけのリクエストより遅れてエンジンに届き、同じステップに乗らないため、競合が起きず差が出ない。
+`TRACE_SCHEDULE=1` で、main のとき `[473, 39]` → `[1, 73]` と分割され、PR1 では `[473]` → `[1, 112]` になるのを確認できる。
+PR2 の CPU 対応が前提 (main の CPU は `mm_prefix` を無視するので、分割しても数値に出ない)。
+
 ## ベンチマーク (Apple M3 8GB / CPU, fp32)
 
 `scripts/bench_hf_vs_vllm.py`: リクエストごとに別画像 (prefix cache は効かない)、出力長固定、画像前処理込みで HF `generate` と vLLM を比較。
