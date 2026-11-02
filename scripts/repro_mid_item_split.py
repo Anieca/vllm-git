@@ -6,14 +6,16 @@ different question hits that cache inside the image, in a step whose token
 budget is mostly used by a text-only request. Its logprobs are compared with
 the same request run alone, without prefix caching.
 
-Usage: python scripts/repro_mid_item_split.py MODEL_DIR [MODEL_DIR ...]
-(MODEL_DIR from `scripts/build_tiny_gemma3.py DIR --layers 6 --std 2`;
-TRACE_SCHEDULE=1 also prints the tokens scheduled per step)
+Usage: python scripts/repro_mid_item_split.py MODEL [MODEL ...]
+    [--dtype float32] [--gpu-memory-utilization 0.4]
+(MODEL from `scripts/build_tiny_gemma3.py DIR --layers 6 --std 2`, or a Gemma3
+checkpoint such as unsloth/gemma-3-4b-it; TRACE_SCHEDULE=1 also prints the
+tokens scheduled per step)
 """
 
+import argparse
 import gc
 import os
-import sys
 
 from transformers import AutoConfig, AutoProcessor
 from vllm.assets.image import ImageAsset
@@ -22,7 +24,6 @@ from vllm import LLM, SamplingParams
 
 BLOCK_SIZE = 128  # the CPU default; set explicitly so GPUs (default 16) match
 BUDGET = 512
-GPU_MEMORY = 0.4  # two engines in one process on GPU; ignored on CPU
 
 
 def question_prompt(pad: int, question: str) -> str:
@@ -78,13 +79,19 @@ def main():
     # One process, so that both requests of the second call reach the scheduler
     # before its first step. Otherwise the text-only request can run alone first.
     os.environ.setdefault("VLLM_ENABLE_V1_MULTIPROCESSING", "0")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("models", nargs="+")
+    parser.add_argument("--dtype", default="float32")
+    # Two engines live in one process on GPU; ignored on CPU.
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.4)
+    args = parser.parse_args()
     if os.environ.get("TRACE_SCHEDULE"):
         trace_schedule()
-    for path in sys.argv[1:]:
-        run(path)
+    for path in args.models:
+        run(path, args.dtype, args.gpu_memory_utilization)
 
 
-def run(path: str):
+def run(path: str, dtype: str, gpu_memory: float):
     image = ImageAsset("stop_sign").pil_image.convert("RGB")
     processor = AutoProcessor.from_pretrained(path)
     image_token = AutoConfig.from_pretrained(path).image_token_index
@@ -115,12 +122,12 @@ def run(path: str):
 
     llm = LLM(
         model=path,
-        dtype="float32",
+        dtype=dtype,
         max_model_len=2048,
         max_num_batched_tokens=BUDGET,
         enable_prefix_caching=True,
         block_size=BLOCK_SIZE,
-        gpu_memory_utilization=GPU_MEMORY,
+        gpu_memory_utilization=gpu_memory,
         limit_mm_per_prompt={"image": 1},
         enforce_eager=True,
     )
@@ -134,10 +141,10 @@ def run(path: str):
 
     ref = LLM(
         model=path,
-        dtype="float32",
+        dtype=dtype,
         max_model_len=2048,
         enable_prefix_caching=False,
-        gpu_memory_utilization=GPU_MEMORY,
+        gpu_memory_utilization=gpu_memory,
         limit_mm_per_prompt={"image": 1},
         enforce_eager=True,
     )
