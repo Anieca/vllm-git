@@ -7,7 +7,9 @@ own process to keep memory usage down.
 
 Usage:
     python scripts/bench_hf_vs_vllm.py [--num-requests 64] [--output-len 32]
-        [--hf-batch-size 8] [--configs hf,vllm,vllm-no-mm-prefix]
+        [--hf-batch-size 8] [--configs hf,vllm,vllm-no-mm-prefix] [--dtype float32]
+
+HF runs on the GPU when there is one.
 """
 
 import argparse
@@ -48,13 +50,16 @@ def bench_hf(args, images):
     import torch
     from transformers import AutoProcessor, GitForCausalLM
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    dtype = getattr(torch, args.dtype)
     processor = AutoProcessor.from_pretrained(MODEL)
-    model = GitForCausalLM.from_pretrained(MODEL, dtype=torch.float32).eval()
+    model = GitForCausalLM.from_pretrained(MODEL, dtype=dtype).to(device).eval()
     cls_id = processor.tokenizer.cls_token_id
 
     def run(batch):
         pixel_values = processor(images=batch, return_tensors="pt").pixel_values
-        input_ids = torch.full((len(batch), 1), cls_id)
+        pixel_values = pixel_values.to(device, dtype)
+        input_ids = torch.full((len(batch), 1), cls_id, device=device)
         with torch.inference_mode():
             model.generate(
                 pixel_values=pixel_values,
@@ -82,7 +87,7 @@ def bench_vllm(args, images, mm_prefix: bool):
 
     llm = LLM(
         model=MODEL,
-        dtype="float32",
+        dtype=args.dtype,
         max_model_len=512,
         limit_mm_per_prompt={"image": 1},
         enable_prefix_caching=False,
@@ -123,6 +128,7 @@ def main():
     parser.add_argument("--output-len", type=int, default=32)
     parser.add_argument("--hf-batch-size", type=int, default=8)
     parser.add_argument("--configs", default="hf,vllm,vllm-no-mm-prefix")
+    parser.add_argument("--dtype", default="float32")
     parser.add_argument("--run", help=argparse.SUPPRESS)
     args = parser.parse_args()
 

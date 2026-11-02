@@ -3,7 +3,9 @@
 Usage:
     python scripts/compare_hf_vllm.py [--model microsoft/git-base-coco] [--eager]
         [--max-num-batched-tokens N] [--max-num-seqs N] [--no-mm-prefix]
-        [--no-prefix-caching] [--dump-vllm out.json]
+        [--no-prefix-caching] [--dtype float32] [--dump-vllm out.json]
+
+HF always runs in fp32 on CPU as the reference; `--dtype` only sets vLLM's.
 
 `--max-num-seqs 1` makes vLLM run one request at a time (batch size 1, like the
 HF side). `--dump-vllm` saves vLLM's token ids and logprobs, e.g. to check that
@@ -74,10 +76,11 @@ def run_vllm(
     max_num_seqs,
     mm_prefix,
     prefix_caching,
+    dtype,
 ):
     llm = LLM(
         model=model_id,
-        dtype="float32",
+        dtype=dtype,
         max_num_batched_tokens=max_num_batched_tokens,
         max_num_seqs=max_num_seqs,
         enforce_eager=eager,
@@ -112,6 +115,7 @@ def main():
     parser.add_argument("--max-num-seqs", type=int, default=None)
     parser.add_argument("--no-mm-prefix", action="store_true")
     parser.add_argument("--no-prefix-caching", action="store_true")
+    parser.add_argument("--dtype", default="float32")
     parser.add_argument("--dump-vllm", help="save vLLM token ids / logprobs as JSON")
     args = parser.parse_args()
 
@@ -129,6 +133,7 @@ def main():
         args.max_num_seqs,
         not args.no_mm_prefix,
         not args.no_prefix_caching,
+        args.dtype,
     )
 
     if args.dump_vllm:

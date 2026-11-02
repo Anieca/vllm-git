@@ -20,8 +20,9 @@ from vllm.assets.image import ImageAsset
 
 from vllm import LLM, SamplingParams
 
-BLOCK_SIZE = 128  # the CPU default
+BLOCK_SIZE = 128  # the CPU default; set explicitly so GPUs (default 16) match
 BUDGET = 512
+GPU_MEMORY = 0.4  # two engines in one process on GPU; ignored on CPU
 
 
 def question_prompt(pad: int, question: str) -> str:
@@ -48,7 +49,9 @@ def trace_schedule():
 
     from vllm.v1.attention.backends.cpu_attn import CPUAttentionMetadataBuilder
 
-    build = CPUAttentionMetadataBuilder._build_mm_prefix
+    build = getattr(CPUAttentionMetadataBuilder, "_build_mm_prefix", None)
+    if build is None:  # without Anieca/vllm#2
+        return
 
     def traced_build(self, common):
         meta = build(self, common)
@@ -116,6 +119,8 @@ def run(path: str):
         max_model_len=2048,
         max_num_batched_tokens=BUDGET,
         enable_prefix_caching=True,
+        block_size=BLOCK_SIZE,
+        gpu_memory_utilization=GPU_MEMORY,
         limit_mm_per_prompt={"image": 1},
         enforce_eager=True,
     )
@@ -132,6 +137,7 @@ def run(path: str):
         dtype="float32",
         max_model_len=2048,
         enable_prefix_caching=False,
+        gpu_memory_utilization=GPU_MEMORY,
         limit_mm_per_prompt={"image": 1},
         enforce_eager=True,
     )
