@@ -3,7 +3,8 @@
 A primer caches the start of an image. A request with the same image and another
 question then hits that cache inside the image, in a step whose token budget a
 text-only request mostly uses. Its logprobs are compared with the same request
-run alone. TRACE=1 prints the tokens scheduled per request in each step.
+run alone. TRACE=1 prints the tokens scheduled per request in each step;
+LEFT=200 leaves the hit room for the rest of the image (no split), as a control.
 
     python repro_split_after_cache_hit.py [MODEL] [DTYPE]
 """
@@ -20,7 +21,8 @@ from vllm import LLM, SamplingParams
 
 MODEL = sys.argv[1] if len(sys.argv) > 1 else "unsloth/gemma-3-4b-it"
 DTYPE = sys.argv[2] if len(sys.argv) > 2 else "float32"
-BLOCK, BUDGET, LEFT = 128, 512, 40
+BLOCK, BUDGET = 128, 512
+LEFT = int(os.environ.get("LEFT", "40"))  # budget left for the hit in its step
 
 if os.environ.get("TRACE"):
     from vllm.v1.core.sched.scheduler import Scheduler
@@ -78,13 +80,18 @@ llm.generate([request("What is in the image?")], params, use_tqdm=False)
 filler = {"prompt": "<bos>" + " lorem" * (BUDGET - LEFT - 1)}
 out = llm.generate([filler, hit], params, use_tqdm=False)[1]
 
+got, ref = out.outputs[0], alone.outputs[0]
+# Compare up to the first differing token; after it the contexts differ.
+n = next(
+    (i for i, (a, b) in enumerate(zip(got.token_ids, ref.token_ids)) if a != b), None
+)
 diff = max(
-    abs(lp.logprob - ref[tok].logprob)
-    for got, ref in zip(out.outputs[0].logprobs, alone.outputs[0].logprobs)
-    for tok, lp in got.items()
-    if tok in ref
+    abs(lp.logprob - r[tok].logprob)
+    for g, r in list(zip(got.logprobs, ref.logprobs))[: None if n is None else n + 1]
+    for tok, lp in g.items()
+    if tok in r
 )
 print(
     f"image ends at {image_end}, cache hit {out.num_cached_tokens} tokens, "
-    f"max |logprob diff| vs alone {diff:.2e}"
+    f"same tokens {n is None}, max |logprob diff| vs alone {diff:.2e}"
 )
