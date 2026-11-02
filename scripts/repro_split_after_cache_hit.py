@@ -85,13 +85,15 @@ got, ref = out.outputs[0], alone.outputs[0]
 n = next(
     (i for i, (a, b) in enumerate(zip(got.token_ids, ref.token_ids)) if a != b), None
 )
-diff = max(
-    abs(lp.logprob - r[tok].logprob)
-    for g, r in list(zip(got.logprobs, ref.logprobs))[: None if n is None else n + 1]
-    for tok, lp in g.items()
-    if tok in r
+pairs = list(zip(got.logprobs, ref.logprobs, got.token_ids))[
+    : None if n is None else n + 1
+]
+top5 = max(
+    abs(lp.logprob - r[t].logprob) for g, r, _ in pairs for t, lp in g.items() if t in r
 )
+chosen = max(abs(g[t].logprob - r[t].logprob) for g, r, t in pairs if t in r)
 print(
     f"image ends at {image_end}, cache hit {out.num_cached_tokens} tokens, "
-    f"same tokens {n is None}, max |logprob diff| vs alone {diff:.2e}"
+    f"same tokens {n is None}, max |logprob diff| vs alone: "
+    f"chosen tokens {chosen:.2e}, top-5 {top5:.2e}"
 )
